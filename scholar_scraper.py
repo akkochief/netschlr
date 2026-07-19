@@ -18,7 +18,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Dict, Any, Tuple, Set
 from dataclasses import dataclass, field
 
-# Windows için ANSI renk desteğini etkinleştir
 if platform.system() == 'Windows':
     try:
         import ctypes
@@ -28,7 +27,6 @@ if platform.system() == 'Windows':
         pass
 
 class Colors:
-    # Windows'ta renklerin çalışması için ANSI escape kodları
     RESET = '\033[0m'
     BOLD = '\033[1m'
     DIM = '\033[2m'
@@ -66,17 +64,14 @@ def colored(text: str, color: str = Colors.WHITE, bold: bool = False, dim: bool 
 class Logger:
     def __init__(self):
         self.log_level = "INFO"
-        # Windows'ta renkleri kapatma seçeneği
         self.use_colors = True
         if platform.system() == 'Windows':
-            # Windows terminalinde renkler çalışmıyorsa kapat
             try:
                 import ctypes
                 kernel32 = ctypes.windll.kernel32
-                # Konsol modunu kontrol et
                 mode = ctypes.c_ulong()
                 kernel32.GetConsoleMode(kernel32.GetStdHandle(-11), ctypes.byref(mode))
-                if not (mode.value & 4):  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+                if not (mode.value & 4):
                     self.use_colors = False
             except:
                 self.use_colors = False
@@ -278,7 +273,6 @@ def save_cookies():
         log.success(f"Saved {len(cookies)} cookies -> {COOKIE_FILE.resolve()}")
 
 def clean_turkish_chars(text: str) -> str:
-    """Türkçe karakterleri İngilizce karşılıklarına dönüştürür"""
     turkish_chars = "çğıöşüÇĞİÖŞÜ"
     english_chars = "cgiosuCGIOSU"
     trans = str.maketrans(turkish_chars, english_chars)
@@ -424,10 +418,8 @@ def batch_verify_emails(emails: list, max_workers: int = 5) -> dict:
     return results
 
 def read_list_page_with_emails(page) -> list[dict]:
-    """Google Scholar sayfasından araştırmacı bilgilerini çeker"""
     cards = page.evaluate("""
         () => {
-            // Türkçe karakter dönüşümü için yardımcı fonksiyon
             function cleanTurkish(text) {
                 if (!text) return text;
                 const map = {
@@ -451,25 +443,18 @@ def read_list_page_with_emails(page) -> list[dict]:
                 const interest_els = card.querySelectorAll('.gs_ai_one_int');
                 const card_text = card.innerText;
                 
-                // 1. Direkt email formatında ara (örn: adil.denizli@hacettepe.edu.tr)
                 let email = '';
                 const email_match = card_text.match(/[\\w.+\\-]+@[\\w\\-]+\\.[\\w.]+/);
                 if (email_match) {
                     email = email_match[0];
                 }
                 
-                // 2. Domain'i ara - "hacettepe.edu.tr üzerinde doğrulanmış" veya "verified email on"
                 let domain = null;
                 const domain_patterns = [
-                    // Türkçe: "hacettepe.edu.tr üzerinde doğrulanmış e-posta adresine sahip"
                     /([\\w\\-]+\\.\\w+(?:\\.\\w+)?)\\s+üzerinde\\s+doğrulanmış/i,
-                    // Türkçe: "hacettepe.edu.tr üzerinden doğrulanmış"
                     /([\\w\\-]+\\.\\w+(?:\\.\\w+)?)\\s+üzerinden\\s+doğrulanmış/i,
-                    // İngilizce: "verified email on hacettepe.edu.tr"
                     /verified\\s+email\\s+(?:on|at)\\s+([\\w\\-]+\\.\\w+(?:\\.\\w+)?)/i,
-                    // İngilizce: "email verified on hacettepe.edu.tr"
                     /email\\s+verified\\s+(?:on|at)\\s+([\\w\\-]+\\.\\w+(?:\\.\\w+)?)/i,
-                    // Genel domain yakalama
                     /([\\w\\-]+\\.\\w+(?:\\.\\w+)?)\\s+(?:üzerinde|üzerinden|on|at)/i
                 ];
                 
@@ -481,11 +466,9 @@ def read_list_page_with_emails(page) -> list[dict]:
                     }
                 }
                 
-                // 3. Eğer email yoksa ve domain varsa, isimden email oluştur
                 if (!email && domain) {
                     const name = name_el ? name_el.innerText.trim() : '';
                     if (name) {
-                        // Türkçe karakterleri dönüştür ve temizle
                         const clean = cleanTurkish(name.toLowerCase())
                             .replace(/[^a-z\\s]/g, '')
                             .replace(/\\s+/g, ' ')
@@ -493,7 +476,6 @@ def read_list_page_with_emails(page) -> list[dict]:
                         
                         const parts = clean.split(' ');
                         if (parts.length >= 2) {
-                            // İsim.soyisim@domain
                             email = parts[0] + '.' + parts[parts.length-1] + '@' + domain;
                         } else if (parts.length === 1) {
                             email = parts[0] + '@' + domain;
@@ -501,7 +483,6 @@ def read_list_page_with_emails(page) -> list[dict]:
                     }
                 }
                 
-                // 4. ORCID ara
                 let orcid = '';
                 const orcid_match = card_text.match(/orcid\\.org\\/(\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX])/i);
                 if (orcid_match) {
@@ -703,7 +684,6 @@ def scrape(query: str, max_results: int, headless: bool, own_email: str = "", en
                 orcid = raw.get("orcid", "")
                 email = raw.get("email", "")
                 
-                # Eğer email system email ise veya own_email ile aynıysa temizle
                 if email and is_system_email(email):
                     email = ""
                 if email and email in all_emails:
@@ -713,7 +693,6 @@ def scrape(query: str, max_results: int, headless: bool, own_email: str = "", en
                 if own_email and email and email.lower() == own_email.lower():
                     email = ""
                 
-                # Email oluşturulmuşsa veya bulunmuşsa verified true
                 verified = True if email else False
                 
                 result_dict = {
@@ -764,7 +743,6 @@ def scrape(query: str, max_results: int, headless: bool, own_email: str = "", en
                     if found_links:
                         log.success(f"    Found: {', '.join(found_links)}")
                 else:
-                    # Email durumunu göster
                     if email:
                         domain = email.split('@')[1] if '@' in email else ''
                         status = colored(f"FOUND ({domain})", Colors.BRIGHT_GREEN)
@@ -1008,13 +986,8 @@ def main_interactive():
     except:
         max_results = 100
     
-    # Browser gösterme: default YES
     visible = get_yes_no("Show browser window", True)
-    
-    # OSINT: default NO
     enable_osint = get_yes_no("Enable OSINT scanning (LinkedIn, GitHub, etc.)", False)
-    
-    # Email verification: default NO
     verify = get_yes_no("Verify emails (SMTP check - slower)", False)
     
     filename = get_input("Output filename (without extension)", f"scholar_{query.replace(' ', '_')[:20]}")

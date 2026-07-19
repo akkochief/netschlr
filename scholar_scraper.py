@@ -18,13 +18,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Dict, Any, Tuple, Set
 from dataclasses import dataclass, field
 
+# Windows için ANSI renk desteğini etkinleştir
+if platform.system() == 'Windows':
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    except:
+        pass
+
 class Colors:
-    if platform.system() == 'Windows':
-        try:
-            subprocess.check_call('color', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except:
-            pass
-    
+    # Windows'ta renklerin çalışması için ANSI escape kodları
     RESET = '\033[0m'
     BOLD = '\033[1m'
     DIM = '\033[2m'
@@ -62,11 +66,29 @@ def colored(text: str, color: str = Colors.WHITE, bold: bool = False, dim: bool 
 class Logger:
     def __init__(self):
         self.log_level = "INFO"
+        # Windows'ta renkleri kapatma seçeneği
+        self.use_colors = True
+        if platform.system() == 'Windows':
+            # Windows terminalinde renkler çalışmıyorsa kapat
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                # Konsol modunu kontrol et
+                mode = ctypes.c_ulong()
+                kernel32.GetConsoleMode(kernel32.GetStdHandle(-11), ctypes.byref(mode))
+                if not (mode.value & 4):  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+                    self.use_colors = False
+            except:
+                self.use_colors = False
     
     def _format(self, message: str, color: str, bold: bool = False) -> str:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        time_str = colored(f"[{timestamp}]", Colors.BRIGHT_BLACK, dim=True)
-        msg = colored(message, color, bold=bold)
+        if self.use_colors:
+            time_str = colored(f"[{timestamp}]", Colors.BRIGHT_BLACK, dim=True)
+            msg = colored(message, color, bold=bold)
+        else:
+            time_str = f"[{timestamp}]"
+            msg = message
         return f"{time_str} {msg}"
     
     def info(self, message: str):
@@ -97,20 +119,31 @@ class Logger:
         print(self._format(message, Colors.BRIGHT_YELLOW))
     
     def header(self, message: str):
-        print(colored("=" * 70, Colors.BRIGHT_BLACK, dim=True))
-        print(colored(f"  {message}", Colors.BRIGHT_WHITE, bold=True))
-        print(colored("=" * 70, Colors.BRIGHT_BLACK, dim=True))
+        if self.use_colors:
+            print(colored("=" * 70, Colors.BRIGHT_BLACK, dim=True))
+            print(colored(f"  {message}", Colors.BRIGHT_WHITE, bold=True))
+            print(colored("=" * 70, Colors.BRIGHT_BLACK, dim=True))
+        else:
+            print("=" * 70)
+            print(f"  {message}")
+            print("=" * 70)
     
     def subheader(self, message: str):
-        print(colored(f"--- {message} ---", Colors.BRIGHT_BLACK, dim=True))
+        if self.use_colors:
+            print(colored(f"--- {message} ---", Colors.BRIGHT_BLACK, dim=True))
+        else:
+            print(f"--- {message} ---")
     
     def progress(self, current: int, total: int, message: str = ""):
         percent = (current / total * 100) if total > 0 else 0
         bar_length = 35
         filled = int(bar_length * current / total) if total > 0 else 0
         bar = "#" * filled + "-" * (bar_length - filled)
-        color = Colors.BRIGHT_GREEN if percent > 80 else Colors.BRIGHT_YELLOW if percent > 50 else Colors.BRIGHT_CYAN
-        print(colored(f"  [{bar}] {percent:5.1f}%  {message}", color))
+        if self.use_colors:
+            color = Colors.BRIGHT_GREEN if percent > 80 else Colors.BRIGHT_YELLOW if percent > 50 else Colors.BRIGHT_CYAN
+            print(colored(f"  [{bar}] {percent:5.1f}%  {message}", color))
+        else:
+            print(f"  [{bar}] {percent:5.1f}%  {message}")
 
 log = Logger()
 
@@ -245,6 +278,7 @@ def save_cookies():
         log.success(f"Saved {len(cookies)} cookies -> {COOKIE_FILE.resolve()}")
 
 def clean_turkish_chars(text: str) -> str:
+    """Türkçe karakterleri İngilizce karşılıklarına dönüştürür"""
     turkish_chars = "çğıöşüÇĞİÖŞÜ"
     english_chars = "cgiosuCGIOSU"
     trans = str.maketrans(turkish_chars, english_chars)
@@ -390,8 +424,25 @@ def batch_verify_emails(emails: list, max_workers: int = 5) -> dict:
     return results
 
 def read_list_page_with_emails(page) -> list[dict]:
+    """Google Scholar sayfasından araştırmacı bilgilerini çeker"""
     cards = page.evaluate("""
         () => {
+            // Türkçe karakter dönüşümü için yardımcı fonksiyon
+            function cleanTurkish(text) {
+                if (!text) return text;
+                const map = {
+                    'ç': 'c', 'Ç': 'C',
+                    'ğ': 'g', 'Ğ': 'G',
+                    'ı': 'i', 'İ': 'I',
+                    'ö': 'o', 'Ö': 'O',
+                    'ş': 's', 'Ş': 'S',
+                    'ü': 'u', 'Ü': 'U'
+                };
+                return text.replace(/[çÇğĞıİöÖşŞüÜ]/g, function(match) {
+                    return map[match] || match;
+                });
+            }
+            
             return Array.from(document.querySelectorAll('.gsc_1usr')).map(card => {
                 const name_el = card.querySelector('.gs_ai_name');
                 const inst_el = card.querySelector('.gs_ai_aff');
@@ -399,37 +450,64 @@ def read_list_page_with_emails(page) -> list[dict]:
                 const link_el = card.querySelector('.gs_ai_name a');
                 const interest_els = card.querySelectorAll('.gs_ai_one_int');
                 const card_text = card.innerText;
+                
+                // 1. Direkt email formatında ara (örn: adil.denizli@hacettepe.edu.tr)
                 let email = '';
                 const email_match = card_text.match(/[\\w.+\\-]+@[\\w\\-]+\\.[\\w.]+/);
                 if (email_match) {
                     email = email_match[0];
                 }
-                if (!email) {
-                    const domain_match = card_text.match(/([\\w\\-]+\\.\\w+)\\s+(?:üzerinde|üzerinden)\\s+doğrulanmış/i);
-                    if (!domain_match) {
-                        const domain_match_en = card_text.match(/verified\\s+email\\s*(?::|on)\\s*([\\w\\-]+\\.\\w+)/i);
-                        if (domain_match_en) {
-                            domain_match = domain_match_en;
-                        }
+                
+                // 2. Domain'i ara - "hacettepe.edu.tr üzerinde doğrulanmış" veya "verified email on"
+                let domain = null;
+                const domain_patterns = [
+                    // Türkçe: "hacettepe.edu.tr üzerinde doğrulanmış e-posta adresine sahip"
+                    /([\\w\\-]+\\.\\w+(?:\\.\\w+)?)\\s+üzerinde\\s+doğrulanmış/i,
+                    // Türkçe: "hacettepe.edu.tr üzerinden doğrulanmış"
+                    /([\\w\\-]+\\.\\w+(?:\\.\\w+)?)\\s+üzerinden\\s+doğrulanmış/i,
+                    // İngilizce: "verified email on hacettepe.edu.tr"
+                    /verified\\s+email\\s+(?:on|at)\\s+([\\w\\-]+\\.\\w+(?:\\.\\w+)?)/i,
+                    // İngilizce: "email verified on hacettepe.edu.tr"
+                    /email\\s+verified\\s+(?:on|at)\\s+([\\w\\-]+\\.\\w+(?:\\.\\w+)?)/i,
+                    // Genel domain yakalama
+                    /([\\w\\-]+\\.\\w+(?:\\.\\w+)?)\\s+(?:üzerinde|üzerinden|on|at)/i
+                ];
+                
+                for (const pattern of domain_patterns) {
+                    const match = card_text.match(pattern);
+                    if (match) {
+                        domain = match[1];
+                        break;
                     }
-                    if (domain_match) {
-                        const domain = domain_match[1];
-                        const name = name_el ? name_el.innerText.trim() : '';
-                        if (name && domain) {
-                            const clean_name = name.toLowerCase().replace(/[^a-z0-9\\s]/g, '').split(' ');
-                            if (clean_name.length >= 2) {
-                                email = clean_name[0] + '.' + clean_name[clean_name.length-1] + '@' + domain;
-                            } else if (clean_name.length === 1) {
-                                email = clean_name[0] + '@' + domain;
-                            }
+                }
+                
+                // 3. Eğer email yoksa ve domain varsa, isimden email oluştur
+                if (!email && domain) {
+                    const name = name_el ? name_el.innerText.trim() : '';
+                    if (name) {
+                        // Türkçe karakterleri dönüştür ve temizle
+                        const clean = cleanTurkish(name.toLowerCase())
+                            .replace(/[^a-z\\s]/g, '')
+                            .replace(/\\s+/g, ' ')
+                            .trim();
+                        
+                        const parts = clean.split(' ');
+                        if (parts.length >= 2) {
+                            // İsim.soyisim@domain
+                            email = parts[0] + '.' + parts[parts.length-1] + '@' + domain;
+                        } else if (parts.length === 1) {
+                            email = parts[0] + '@' + domain;
                         }
                     }
                 }
+                
+                // 4. ORCID ara
                 let orcid = '';
                 const orcid_match = card_text.match(/orcid\\.org\\/(\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX])/i);
                 if (orcid_match) {
                     orcid = orcid_match[1];
                 }
+                
                 return {
                     name:   name_el  ? name_el.innerText.trim()  : '',
                     institution:  inst_el ? inst_el.innerText.trim() : '',
@@ -624,6 +702,8 @@ def scrape(query: str, max_results: int, headless: bool, own_email: str = "", en
                 profile_url = ("https://scholar.google.com" + href) if href.startswith("/") else href
                 orcid = raw.get("orcid", "")
                 email = raw.get("email", "")
+                
+                # Eğer email system email ise veya own_email ile aynıysa temizle
                 if email and is_system_email(email):
                     email = ""
                 if email and email in all_emails:
@@ -632,7 +712,10 @@ def scrape(query: str, max_results: int, headless: bool, own_email: str = "", en
                     all_emails.add(email)
                 if own_email and email and email.lower() == own_email.lower():
                     email = ""
+                
+                # Email oluşturulmuşsa veya bulunmuşsa verified true
                 verified = True if email else False
+                
                 result_dict = {
                     "Name": name,
                     "Email": email,
@@ -681,7 +764,12 @@ def scrape(query: str, max_results: int, headless: bool, own_email: str = "", en
                     if found_links:
                         log.success(f"    Found: {', '.join(found_links)}")
                 else:
-                    status = colored("FOUND", Colors.BRIGHT_GREEN) if email else colored("NOT FOUND", Colors.BRIGHT_RED)
+                    # Email durumunu göster
+                    if email:
+                        domain = email.split('@')[1] if '@' in email else ''
+                        status = colored(f"FOUND ({domain})", Colors.BRIGHT_GREEN)
+                    else:
+                        status = colored("NOT FOUND", Colors.BRIGHT_RED)
                     log.email(f"[{len(results)+1}/{max_results}] {name}  <{email}>  {status}")
                 results.append(result_dict)
                 if progress_callback:
@@ -782,7 +870,7 @@ def run_osint_only():
     if not filename:
         filename = f"osint_{input_file.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     output_file = SAVED_DIR / f"{filename}.csv"
-    visible = get_yes_no("Show browser window", False)
+    visible = get_yes_no("Show browser window", True)
     import pandas as pd
     log.info(f"Loading data from: {input_file}")
     df = pd.read_csv(input_file)
@@ -919,9 +1007,16 @@ def main_interactive():
         max_results = int(get_input("Max results", "100"))
     except:
         max_results = 100
-    visible = get_yes_no("Show browser window", False)
-    enable_osint = get_yes_no("Enable OSINT scanning (LinkedIn, GitHub, etc.)", True)
-    verify = get_yes_no("Verify emails (SMTP check - slower)", True)
+    
+    # Browser gösterme: default YES
+    visible = get_yes_no("Show browser window", True)
+    
+    # OSINT: default NO
+    enable_osint = get_yes_no("Enable OSINT scanning (LinkedIn, GitHub, etc.)", False)
+    
+    # Email verification: default NO
+    verify = get_yes_no("Verify emails (SMTP check - slower)", False)
+    
     filename = get_input("Output filename (without extension)", f"scholar_{query.replace(' ', '_')[:20]}")
     if not filename:
         filename = f"scholar_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
